@@ -1,25 +1,14 @@
 #pragma once
 
-// #include <algorithm>
+#include <algorithm>   //for remove_if
 #include <iostream>
-// #include <math.h>
-// #include <thread>
-// #include <chrono>
-// #include <iterator>
 #include <string>
 #include <string.h>     //for strlen on cstring...
-//#include <stdlib.h>
-//#include <stdio.h>
 #include <vector>
 #include <fstream>
-// #include <sstream>
-// #include <stdexcept>
-// #include <cerrno>
-// #include <cstring>
+#include <sstream>
 #include <dirent.h>
-// #include <time.h>
 #include <unistd.h>
-// #include <constants.h>
 
 #include "constants.h"
 #include "util.h"
@@ -72,7 +61,7 @@ class ProcessParser {
 
         //PID specific
 
-        //Return sum of all mapped memories in GB
+        //Return sum of all mapped memories in MB
         static string getVmSize(string pid);
 
         //Process total CPU usage
@@ -87,7 +76,8 @@ class ProcessParser {
         //Process commadline
         static string getCmd(string pid);
 
-        // // static bool isPidExisting(string pid);
+        //Check if specific PID exists
+        static bool isPidExisting(string pid);
 };
 
 //========== System wide ============
@@ -235,14 +225,22 @@ int ProcessParser::getNumberOfRunningProcesses()
 
 //========== PID ============
 
-//Return sum of all mapped memories in GB
+//Return sum of all mapped memories in MB
 //  See: https://stackoverflow.com/questions/17174645/vmsize-physical-memory-swap
 string ProcessParser::getVmSize(string pid){
     //Many processes do no have a VmSize field, so return NA str instead
     try
     {
         string memToken = Util::getToken(Path::statusPath(pid), "VmSize:", 0, 1, '\t');
-        return to_string(stof(memToken) / float(1024 * 1024));
+        uint64_t sizekB = stol(memToken);
+        stringstream stream;
+        if (sizekB < 999)
+            stream << sizekB << " k";
+        else if (sizekB / 1024 < 999)
+            stream << (sizekB / 1024) << " M";
+        else
+            stream << setprecision(3) << (float(sizekB) / 1024.0 / 1024.0) << " G";
+        return stream.str();
     }
     catch(const std::exception& e)
     {
@@ -269,6 +267,8 @@ string ProcessParser::getCpuPercent(string pid)
     float freq = sysconf(_SC_CLK_TCK);
     float total_time = utime + stime + cutime + cstime;
     float seconds = uptime - (starttime/freq);
+    if (seconds == 0)
+        return "0.0";
     return to_string(100.0*((total_time/freq)/seconds));    
 }
 
@@ -279,11 +279,20 @@ string ProcessParser::getProcUser(string pid)
     return Util::getToken(Path::passwdPath(), uidToken, 2, 0, ':');
 }
 
+//Used as helper to remove non-printable chanracters
+bool invalidChar (char c) {  
+    return !(c>=32 && c<=126);   
+} 
+
 //Process commadline
 string ProcessParser::getCmd(string pid)
 {
     string cmdLine;
     getline(Util::getStream(Path::cmdPath(pid)), cmdLine);
+
+    //Remove all non-printable character from the command line
+    cmdLine.erase(remove_if(cmdLine.begin(),cmdLine.end(), invalidChar), cmdLine.end());
+    
     return cmdLine;
 }
 
@@ -300,4 +309,14 @@ float ProcessParser::getSysActiveCpuTime(vector<string> values)
 float ProcessParser::getSysIdleCpuTime(vector<string>values)
 {
     return (stof(values[S_IDLE]) + stof(values[S_IOWAIT]));
+}
+
+//Check if specific PID exists
+bool ProcessParser::isPidExisting(string pid)
+{
+    vector<string> PIDs = ProcessParser::getPidList();
+    for (string currPid : PIDs)
+        if (pid == currPid)
+            return true;
+    return false;
 }
